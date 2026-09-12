@@ -4,8 +4,9 @@ import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { startRegistration } from "@simplewebauthn/browser";
 import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
-import { LogOut, Plus, RefreshCw } from "lucide-react";
+import { LogOut, Plus, RefreshCw, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -17,6 +18,8 @@ import {
 } from "@/components/ui/card";
 import { useDebug } from "@/components/debug/debug-provider";
 import { PasskeyOptions } from "@/components/auth/passkey-options";
+import { RecoveryCard } from "@/components/otp/recovery-card";
+import { TotpCard } from "@/components/otp/totp-card";
 import { CredentialTable } from "./credential-table";
 import { describeWebAuthnError, getJSON, postJSON } from "@/lib/client/api";
 import { usePreferences } from "@/lib/client/use-preferences";
@@ -30,14 +33,15 @@ export function CredentialManager({ initial }: Props) {
   const router = useRouter();
   const { log } = useDebug();
   const [preferences, updatePreferences] = usePreferences();
-  const [credentials, setCredentials] = useState<CredentialView[]>(initial.credentials);
+  const [me, setMe] = useState<MeResponse>(initial);
+  const credentials: CredentialView[] = me.credentials;
   const [busy, setBusy] = useState<"add" | "reload" | "signout" | null>(null);
 
   const reload = useCallback(async () => {
     setBusy("reload");
     try {
-      const me = await getJSON<MeResponse | null>("/api/me");
-      if (me) setCredentials(me.credentials);
+      const next = await getJSON<MeResponse | null>("/api/me");
+      if (next) setMe(next);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not reload.");
     } finally {
@@ -118,11 +122,22 @@ export function CredentialManager({ initial }: Props) {
 
   return (
     <div className="min-w-0 space-y-4">
+      {me.viaRecovery && (
+        <Alert>
+          <TriangleAlert className="size-4" />
+          <AlertTitle>You signed in with a recovery code</AlertTitle>
+          <AlertDescription>
+            That code is now spent. Enroll a passkey on a key you still have, and regenerate your
+            recovery codes if the old list is no longer safe.
+          </AlertDescription>
+        </Alert>
+      )}
+
       <Card>
         <CardHeader>
-          <CardTitle className="truncate">{initial.displayName}</CardTitle>
+          <CardTitle className="truncate">{me.displayName}</CardTitle>
           <CardDescription className="truncate">
-            signed in as <span className="font-mono">{initial.username}</span>
+            signed in as <span className="font-mono">{me.username}</span>
           </CardDescription>
           <CardAction>
             <Button
@@ -174,6 +189,9 @@ export function CredentialManager({ initial }: Props) {
           <CredentialTable credentials={credentials} onChanged={() => void reload()} />
         </CardContent>
       </Card>
+
+      <TotpCard status={me.totp} onChanged={() => void reload()} />
+      <RecoveryCard status={me.recovery} onChanged={() => void reload()} />
     </div>
   );
 }

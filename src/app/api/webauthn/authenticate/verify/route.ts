@@ -74,7 +74,7 @@ export async function POST(request: Request) {
     const user = await db.users.findById(credential.userId);
     if (!user) throw new CeremonyError("The account for this passkey no longer exists.");
 
-    await createSession(user.id, credential.id);
+    await createSession(user.id, credential.id, "passkey");
 
     const outcome: CeremonyOutcome = {
       verified: true,

@@ -88,7 +88,7 @@ export async function POST(request: Request) {
     });
 
     // Registering proves possession of the key, so it signs you in.
-    await createSession(user.id, credential.id);
+    await createSession(user.id, credential.id, "passkey");
 
     const outcome: CeremonyOutcome = {
       verified: true,

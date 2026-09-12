@@ -4,6 +4,11 @@ A WebAuthn / FIDO2 demo built around a **hardware security key**. Register a Yub
 with it — with or without a username — and watch every step of the ceremony in a live debug
 panel. There is no password anywhere in the flow.
 
+Two fallbacks sit alongside the passkey, for when the key is elsewhere or gone for good: a
+**TOTP authenticator app** and **single-use recovery codes**.
+
+**Live:** <https://pksignin.vercel.app>
+
 The authentication is implemented directly against the WebAuthn API rather than delegated to an
 auth provider, because the ceremony *is* the thing being demonstrated.
 
@@ -18,7 +23,8 @@ auth provider, because the ceremony *is* the thing being demonstrated.
 | Tailwind CSS | 4 |
 | shadcn/ui | Radix base, Nova preset |
 | `@simplewebauthn/server` + `/browser` | 14 |
-| [`repolayer`](https://www.npmjs.com/package/repolayer) | 2.1 — SQLite now, Postgres later |
+| [`repolayer`](https://www.npmjs.com/package/repolayer) | 2.1 — SQLite locally, Neon Postgres deployed |
+| `qrcode-generator` | 2.0 — zero-dependency QR for TOTP enrollment |
 
 Storage goes through repolayer, so the engine is one config value rather than a rewrite. It uses
 Node's built-in `node:sqlite` underneath, so there is no native module to compile.
@@ -34,7 +40,8 @@ Open <http://localhost:3000>. No `.env.local` is needed — see `.env.local.exam
 optional settings. The database is created at `.data/passkeys.db` on first use.
 
 > `localhost` is exempt from the HTTPS requirement, so a USB key works in development with no
-> TLS setup. Any other host must be real HTTPS, which is what Phase 2 below is about.
+> TLS setup. Any other host must be real HTTPS — which is what the deployment is for, and the only
+> way to test a YubiKey over NFC on a phone.
 
 ## What it does
 
@@ -48,6 +55,10 @@ optional settings. The database is created at `.data/passkeys.db` on first use.
   ceremony, plus the parsed result flags.
 - **Capability card**: what this browser's WebAuthn client can actually do — the quickest
   explanation of why a key behaves differently on a PC than on Android.
+- **Authenticator app (TOTP)**: enroll by QR, then sign in with a six-digit code when the key is
+  not to hand. RFC 6238, implemented here rather than pulled in — see below.
+- **Recovery codes**: ten single-use codes, shown once, for when the key is lost rather than
+  merely elsewhere.
 
 ## Testing with a YubiKey (PC, USB)
 
@@ -89,6 +100,51 @@ adjustable rather than hardcoded:
 | "This authenticator is already registered" | `excludeCredentials` working as intended — that key is already enrolled on this account. |
 | Usernameless sign-in finds nothing | The passkey was not stored as discoverable. Re-register with `residentKey: required`. |
 | Nothing works, no prompt at all | Not a secure context. WebAuthn needs `localhost` or HTTPS. |
+
+## Signing in without the key
+
+A passkey-only account is a one-way door if the key is lost, so there are two ways back in. Both
+are **alternatives** to the passkey rather than extra steps on top of it: a YubiKey with a PIN
+already proves possession and knowledge, so stacking a code on top would add friction without
+adding much security.
+
+### Authenticator app (TOTP)
+
+Enroll from the dashboard, scan the QR with any authenticator app — Google Authenticator, Aegis,
+1Password, or a YubiKey itself via Yubico Authenticator — then confirm with a code to prove the
+two are in sync. Afterwards, **Use a code** on the sign-in screen takes a username and a code.
+
+RFC 6238 is implemented in `src/lib/otp/` rather than taken from a package: it is about forty
+lines, it is the part of this demo worth reading, and a one-digit error in the truncation step
+still produces plausible six-digit codes. `npm run test:totp` checks it against the published
+vectors in RFC 6238 Appendix B (SHA1, SHA256 and SHA512) and RFC 4648 section 10.
+
+Details that matter more than the algorithm:
+
+- **Secrets are encrypted at rest**, AES-256-GCM, keyed by `APP_ENCRYPTION_KEY`. A TOTP secret
+  cannot be hashed the way a password is — the server needs the original bytes every time — so
+  encryption is the only option. Without the variable set, development derives a fixed key and
+  says so; production refuses to start.
+- **A code cannot be replayed.** The time step each accepted code came from is recorded, and a
+  code from that step or earlier is refused — otherwise a code glimpsed over a shoulder stays
+  usable for the rest of its ~90-second window.
+- **Attempts are limited**: five wrong codes locks the account for fifteen minutes. Six digits is
+  one in a million and stays valid for a minute and a half, so without this the endpoint is
+  brute-forceable. The passkey routes deliberately have no such limit — a signature cannot be
+  guessed, so rate limiting there would only be a denial-of-service lever.
+- **Enrollment requires a session**, so it is the passkey that authorizes adding a second way in.
+
+### Recovery codes
+
+Ten codes, each usable once, generated from an alphabet with no `I`, `L`, `O`, `U` so nothing is
+misread when copied onto paper. They are **hashed, not encrypted** — verifying one only requires
+recognizing it. A plain SHA-256 is correct here rather than scrypt or argon2: these are 50-bit
+random strings, not human-chosen passwords, so there is no dictionary to run, and hashing lets a
+code be found in one indexed lookup instead of running a slow KDF against every stored code.
+
+Signing in with one marks the session as `recovery`, and the dashboard then says so and pushes you
+to enroll a replacement passkey. A spent code is rejected with exactly the same message as a wrong
+one, so the endpoint never confirms that a guess was once real.
 
 ## How it works
 
@@ -145,47 +201,80 @@ src/
   lib/
     db/schema.ts                 repolayer schemas — the only description of the storage shape
     db/index.ts                  the engine swap point
+    otp/totp.ts                  RFC 6238, verified by scripts/totp-vectors.ts
+    otp/recovery-codes.ts        single-use code generation and hashing
+    crypto/secret-box.ts         AES-256-GCM for TOTP secrets
+    throttle.ts                  attempt limiting for the code routes
     webauthn/rp.ts               per-request RP ID and origin
     webauthn/challenge.ts        server-side, single-use challenges
     webauthn/preferences.ts      ceremony options, validated against allowlists
     aaguid/                      vendored AAGUID → model-name map
     session.ts                   database-backed session cookie
   components/
-    auth/, credentials/, debug/, capability-card.tsx, relying-party-card.tsx
+    auth/, credentials/, debug/, otp/, capability-card.tsx, relying-party-card.tsx
+scripts/
+  totp-vectors.ts                npm run test:totp
 ```
 
 `ensureTable()` generates the schema on startup and `verifyTable()` checks the live tables against
 it, reporting drift with the fix. After changing a schema in development, delete
 `.data/passkeys.db` and let it be recreated — `ensureTable` never alters an existing table.
 
-## Phase 2: Vercel and YubiKey NFC on Android
+## Deployment (Vercel + Neon Postgres)
 
-Testing NFC needs a real HTTPS origin, which means deploying. Two things change:
+Live at **<https://pksignin.vercel.app>**, on Neon Postgres provisioned through the Vercel
+Marketplace.
 
-**1. Storage.** Vercel's filesystem is read-only, so SQLite cannot persist there. Provision
-Postgres (Neon through the Vercel Marketplace) and set:
+Switching engines was a change to `src/lib/db/index.ts` and two environment variables — no route
+handler, component, or query changed, which is the whole reason the data access goes through
+repolayer. Both the passkey and the OTP/recovery suites pass identically on SQLite and on Postgres.
+
+### Reproducing it
 
 ```bash
-npm install pg          # an optional peer dependency, imported lazily
+vercel link
+vercel integration add neon            # provisions the database and sets DATABASE_URL
+npm install pg                         # repolayer's optional peer, imported lazily
+
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+vercel env add APP_ENCRYPTION_KEY production
+vercel env add PASSKEY_DB_DRIVER production   # value: postgres
+
+vercel deploy --prod
 ```
 
-```
-PASSKEY_DB_DRIVER=postgres
-DATABASE_URL=postgres://…
-```
+`APP_ENCRYPTION_KEY` must stay fixed for the life of an environment — change it and every enrolled
+TOTP secret becomes undecryptable.
 
-No route handler or component changes — that is what the repository layer is for.
+`PASSKEY_DB_DRIVER` is deliberately **not** set for the `development` environment, so `vercel env
+pull` leaves local development on its own SQLite file instead of writing into the deployed
+database.
 
-**2. Nothing else.** The RP ID and origin already come from the request, so the preview URL works
-as-is.
+### Two things worth knowing
 
-Then, on an Android phone:
+- **Use the alias, not the deployment URL.** `pksignin.vercel.app` is public; the per-deployment
+  URL (`pksignin-<hash>-….vercel.app`) is behind Vercel's deployment protection and redirects to a
+  login. It also has a *different hostname*, and a passkey is bound to its RP ID — one registered
+  on the alias will not work on the deployment URL, and vice versa.
+- **`ensureTable` runs on cold start.** Convenient for a demo that provisions its own schema; for
+  anything real, set `PASSKEY_DB_ENSURE_TABLE=false` and let a migration tool own the schema.
+  `verifyTable()` still runs and will report drift.
 
-1. Open the deployment in Chrome and confirm the capability card.
-2. Register a passkey. Hold the YubiKey flat against the back of the phone (the NFC antenna is
-   usually near the top) until it buzzes.
-3. Expect `transports` to include `nfc`, and expect user-verification and discoverability to
-   behave differently from the PC — the debug panel shows exactly how.
+## Testing a YubiKey over NFC on Android
 
-Note that Android will also offer to save a *platform* passkey via the screen lock. Keep
-**Prefer a security key** on to steer the prompt to the YubiKey instead.
+This is what the deployment is for: NFC needs a real HTTPS origin, and `localhost` will not do.
+
+1. Open <https://pksignin.vercel.app> in Chrome on the phone.
+2. Check the capability card. It differs from the desktop — that is the point of the card.
+3. **Register** → **Create a passkey**. Keep **Prefer a security key** on, or Android will offer to
+   save a platform passkey to the screen lock instead of using the YubiKey.
+4. Hold the key flat against the back of the phone — the NFC antenna is usually near the top —
+   until it buzzes.
+5. The credential should list `nfc` among its transports. Open the debug panel to compare the raw
+   authenticator response with the one the same key produced over USB: user verification and
+   discoverability commonly differ between the two.
+6. Sign out and sign in again with the key. Then try **Use a code** and a recovery code, which need
+   no key at all.
+
+If the prompt never appears, the phone is probably on the per-deployment URL rather than the alias,
+or NFC is switched off.

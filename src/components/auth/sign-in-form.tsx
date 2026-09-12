@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useDebug } from "@/components/debug/debug-provider";
+import { CodeSignIn } from "./code-sign-in";
 import { PasskeyOptions } from "./passkey-options";
 import { describeWebAuthnError, postJSON } from "@/lib/client/api";
 import type { CeremonyOutcome } from "@/lib/webauthn/api-types";
@@ -22,11 +23,19 @@ interface Props {
   onPreferencesChange: (patch: Partial<CeremonyPreferences>) => void;
   onSuccess: (username: string, outcome: CeremonyOutcome) => void;
   onError: (message: string) => void;
+  /** Sign-in that did not involve a passkey, so there is no ceremony outcome to report. */
+  onCodeSuccess: (username: string, mode: "totp" | "recovery", remaining?: number) => void;
 }
 
 type Mode = "username" | "discoverable";
 
-export function SignInForm({ preferences, onPreferencesChange, onSuccess, onError }: Props) {
+export function SignInForm({
+  preferences,
+  onPreferencesChange,
+  onSuccess,
+  onError,
+  onCodeSuccess,
+}: Props) {
   const { log } = useDebug();
   const [username, setUsername] = useState("");
   const [busy, setBusy] = useState<Mode | null>(null);
@@ -198,6 +207,13 @@ export function SignInForm({ preferences, onPreferencesChange, onSuccess, onErro
         No username needed — the key supplies the identity itself. This only works for a passkey
         registered as discoverable.
       </p>
+
+      <div className="space-y-2 border-t pt-4">
+        <p className="text-muted-foreground text-xs">
+          Key not to hand, or lost entirely?
+        </p>
+        <CodeSignIn onSuccess={onCodeSuccess} onError={onError} />
+      </div>
     </div>
   );
 }

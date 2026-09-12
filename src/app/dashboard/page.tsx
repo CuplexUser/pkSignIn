@@ -3,6 +3,7 @@ import { CapabilityCard } from "@/components/capability-card";
 import { CredentialManager } from "@/components/credentials/credential-manager";
 import { RelyingPartyCard } from "@/components/relying-party-card";
 import { getDb } from "@/lib/db";
+import { recoveryStatus, totpStatus } from "@/lib/otp/service";
 import { currentSession } from "@/lib/session";
 import { toCredentialView } from "@/lib/webauthn/http";
 import type { MeResponse } from "@/lib/webauthn/api-types";
@@ -24,6 +25,9 @@ export default async function Dashboard() {
     credentials: credentials.map((credential) =>
       toCredentialView(credential, session.session.credentialId),
     ),
+    totp: await totpStatus(session.user.id),
+    recovery: await recoveryStatus(session.user.id),
+    viaRecovery: session.session.method === "recovery",
   };
 
   return (

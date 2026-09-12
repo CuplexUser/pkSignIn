@@ -11,11 +11,17 @@ import {
 import {
   challengeSchema,
   credentialSchema,
+  recoveryCodeSchema,
   sessionSchema,
+  throttleSchema,
+  totpSchema,
   userSchema,
   type Challenge,
   type Credential,
+  type RecoveryCode,
   type Session,
+  type Throttle,
+  type TotpEnrollment,
   type User,
 } from "./schema";
 
@@ -24,6 +30,9 @@ export interface Db {
   credentials: Repo<Credential>;
   challenges: Repo<Challenge>;
   sessions: Repo<Session>;
+  totp: Repo<TotpEnrollment>;
+  recoveryCodes: Repo<RecoveryCode>;
+  throttles: Repo<Throttle>;
 }
 
 /**
@@ -104,7 +113,28 @@ async function open(): Promise<Db> {
     timestamps: { createdAt: "createdAt", updatedAt: false },
   });
 
-  const db: Db = { users, credentials, challenges, sessions };
+  const totp = await makeRepo<TotpEnrollment>("totp", totpSchema, {
+    // Keyed by user id, so the caller supplies it.
+    ids: "provided",
+    timestamps: true,
+  });
+  const recoveryCodes = await makeRepo<RecoveryCode>("recovery_codes", recoveryCodeSchema, {
+    timestamps: { createdAt: "createdAt", updatedAt: false },
+  });
+  const throttles = await makeRepo<Throttle>("throttles", throttleSchema, {
+    ids: "provided",
+    timestamps: { createdAt: false, updatedAt: "updatedAt" },
+  });
+
+  const db: Db = {
+    users,
+    credentials,
+    challenges,
+    sessions,
+    totp,
+    recoveryCodes,
+    throttles,
+  };
   await verify(db);
   return db;
 }

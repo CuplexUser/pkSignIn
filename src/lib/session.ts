@@ -6,12 +6,18 @@ import type { Session, User } from "@/lib/db/schema";
 const COOKIE = "pk_session";
 const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+export type SignInMethod = "passkey" | "totp" | "recovery";
+
 /**
  * Sessions are rows, not signed cookies. The cookie carries a 256-bit random token and
  * nothing else, which keeps sign-out real (deleting the row ends the session everywhere)
  * and means a stolen cookie can be revoked.
  */
-export async function createSession(userId: string, credentialId: string): Promise<void> {
+export async function createSession(
+  userId: string,
+  credentialId: string | null,
+  method: SignInMethod,
+): Promise<void> {
   const db = await getDb();
 
   const id = randomBytes(32).toString("base64url");
@@ -19,6 +25,7 @@ export async function createSession(userId: string, credentialId: string): Promi
     id,
     userId,
     credentialId,
+    method,
     expiresAt: new Date(Date.now() + TTL_MS),
   });
 

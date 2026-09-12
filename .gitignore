@@ -42,3 +42,6 @@ next-env.d.ts
 
 # passkey demo: the SQLite database and its WAL sidecars
 /.data/
+
+.vercel
+.env*

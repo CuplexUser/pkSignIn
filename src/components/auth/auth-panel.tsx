@@ -25,6 +25,17 @@ export function AuthPanel() {
     router.push("/dashboard");
   }
 
+  function onCodeSuccess(username: string, mode: "totp" | "recovery", remaining?: number) {
+    toast.success(`Signed in as ${username}`, {
+      description:
+        mode === "recovery"
+          ? `Recovery code accepted${typeof remaining === "number" ? ` — ${remaining} left` : ""}. Enroll a new passkey now.`
+          : "Authenticator app code accepted",
+    });
+    router.refresh();
+    router.push("/dashboard");
+  }
+
   function onError(message: string) {
     toast.error(message);
   }
@@ -50,6 +61,7 @@ export function AuthPanel() {
               onPreferencesChange={updatePreferences}
               onSuccess={onSuccess}
               onError={onError}
+              onCodeSuccess={onCodeSuccess}
             />
           </TabsContent>
 
