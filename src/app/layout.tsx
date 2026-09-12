@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { KeyRound } from "lucide-react";
 import { Providers } from "@/components/providers";
+import { ThemeToggle } from "@/components/theme-toggle";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -38,6 +39,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                 Passkey Demo
               </Link>
               <span className="text-muted-foreground ml-auto text-xs">WebAuthn / FIDO2</span>
+              <ThemeToggle />
             </div>
           </header>
 
